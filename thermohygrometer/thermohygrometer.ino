@@ -1,3 +1,5 @@
+#include <TimeLib.h>
+
 //LCD
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -55,6 +57,9 @@ typedef struct _lcd_msg {
   unsigned int det_times;
   u8 lcd_stage;
   bool lcd_clear;
+  u8 hours;
+  u8 mins;
+  u8 secs;
 } lcd_msg;
 
 
@@ -123,6 +128,31 @@ void setup()
   init_dht();
 }
 
+void show_time_in_lcd(u8 s_cursor_1, u8 s_cursor_2, lcd_msg* lcd_show_msg)
+{
+  String str_time = "";
+
+  if (lcd_show_msg->hours < 10)
+    str_time += "0";
+
+  str_time += lcd_show_msg->hours;
+  str_time += ":";
+
+  if (lcd_show_msg->mins < 10)
+    str_time += "0";
+
+  str_time += lcd_show_msg->mins;
+  str_time += ":";
+
+  if (lcd_show_msg->secs < 10)
+    str_time += "0";
+
+  str_time += lcd_show_msg->secs;
+
+  lcd.setCursor(s_cursor_1, s_cursor_2);
+  lcd.print(str_time);
+}
+
 void show_in_lcd(lcd_msg* lcd_show_msg)
 {
   Serial.print("lcd_stage:" + String(lcd_show_msg->lcd_stage) + "\n");
@@ -131,8 +161,7 @@ void show_in_lcd(lcd_msg* lcd_show_msg)
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("Ryan temp & humidity");
-      lcd.setCursor(0, 1);
-      lcd.print(String(lcd_show_msg->det_times));
+      show_time_in_lcd(0, 1, lcd_show_msg);
       lcd_show_msg->det_times++;
       break;
     case lcd_stage_dht:
@@ -186,6 +215,14 @@ bool detect_temperature_humidity(float* temperture, float* humidity)
   return true;
 }
 
+void get_time(lcd_msg* lcd_show_msg)
+{
+  time_t t = now();
+  lcd_show_msg->hours = hour(t);
+  lcd_show_msg->mins = minute(t);
+  lcd_show_msg->secs = second(t);
+}
+
 void loop()
 {
   //DHT11
@@ -197,6 +234,7 @@ void loop()
     lcd_show_msg.humidity = 8888;
   }
 
+  get_time(&lcd_show_msg);
   show_in_lcd(&lcd_show_msg);
 
   lcd_show_msg.lcd_stage = lcd_show_msg.lcd_stage + 1;
