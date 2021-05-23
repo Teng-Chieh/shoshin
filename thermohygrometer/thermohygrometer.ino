@@ -36,6 +36,7 @@ const uint8_t charBitmap[][8] = {
 uint32_t delayMS;
 
 typedef enum __lcd_stage {
+  lcd_stage_clear,
   lcd_stage_info,
   lcd_stage_dht,
   lcd_stage_dht_1,
@@ -57,14 +58,18 @@ typedef struct _lcd_msg {
   unsigned int det_times;
   u8 lcd_stage;
   bool lcd_clear;
+} lcd_msg;
+
+typedef struct _time_profile_ {
+  u32 current_sample_time;
+  u32 last_sample_time;
   u8 hours;
   u8 mins;
   u8 secs;
-} lcd_msg;
-
-
+} _time_profile;
 
 lcd_msg lcd_show_msg;
+_time_profile time_profile;
 
 void init_lcd()
 {
@@ -124,48 +129,44 @@ void setup()
 {
   Serial.begin(9600);
   memset(&lcd_show_msg, 0, sizeof(lcd_msg));
+  memset(&time_profile, 0, sizeof(_time_profile));
   init_lcd();
   init_dht();
 }
 
-void show_time_in_lcd(u8 s_cursor_1, u8 s_cursor_2, lcd_msg* lcd_show_msg)
+void show_time_in_lcd(u8 s_cursor_1, u8 s_cursor_2, lcd_msg* lcd_show_msg, _time_profile* t_profile)
 {
   String str_time = "";
 
-  if (lcd_show_msg->hours < 10)
+  if (t_profile->hours < 10)
     str_time += "0";
 
-  str_time += lcd_show_msg->hours;
+  str_time += t_profile->hours;
   str_time += ":";
 
-  if (lcd_show_msg->mins < 10)
+  if (t_profile->mins < 10)
     str_time += "0";
 
-  str_time += lcd_show_msg->mins;
+  str_time += t_profile->mins;
   str_time += ":";
 
-  if (lcd_show_msg->secs < 10)
+  if (t_profile->secs < 10)
     str_time += "0";
 
-  str_time += lcd_show_msg->secs;
+  str_time += t_profile->secs;
 
   lcd.setCursor(s_cursor_1, s_cursor_2);
   lcd.print(str_time);
 }
 
-void show_in_lcd(lcd_msg* lcd_show_msg)
+void show_in_lcd(lcd_msg* lcd_show_msg, _time_profile* t_profile)
 {
-  Serial.print("lcd_stage:" + String(lcd_show_msg->lcd_stage) + "\n");
+  //Serial.print("lcd_stage:" + String(lcd_show_msg->lcd_stage) + "\n");
   switch (lcd_show_msg->lcd_stage) {
+    case lcd_stage_clear:
+      lcd.clear();
     case lcd_stage_info:
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Ryan temp & humidity");
-      show_time_in_lcd(0, 1, lcd_show_msg);
-      lcd_show_msg->det_times++;
-      break;
     case lcd_stage_dht:
-      lcd.clear();
     case lcd_stage_dht_1:
     case lcd_stage_dht_2:
     case lcd_stage_dht_3:
@@ -175,10 +176,12 @@ void show_in_lcd(lcd_msg* lcd_show_msg)
     case lcd_stage_dht_7:
     case lcd_stage_dht_8:
     case lcd_stage_dht_9:
-      lcd.setCursor(0, 0);
-      lcd.print("Temp:" + String(lcd_show_msg->temperature) + " C");
+      lcd.setCursor(1, 0);
+      lcd.print("Ryan");
+      show_time_in_lcd(6, 0, lcd_show_msg, t_profile);
       lcd.setCursor(0, 1);
-      lcd.print("Humi:" + String(lcd_show_msg->humidity) + " %");
+      lcd.print("T:" + String(lcd_show_msg->temperature) + "C " +
+                "H:" + String(lcd_show_msg->humidity) + "%");
       break;
     default:
       lcd.setCursor(0, 0);
@@ -201,7 +204,7 @@ bool detect_temperature_humidity(float* temperture, float* humidity)
     Serial.println(F("Reading temperature or humidity failed!"));
     return false;
   }
-#ifdef DBG_TEMP_HUMI
+#if 0//def DBG_TEMP_HUMI
   Serial.print(F("Temperature: "));
   Serial.print(temp_event.temperature);
   Serial.println(F("°C"));
@@ -215,12 +218,12 @@ bool detect_temperature_humidity(float* temperture, float* humidity)
   return true;
 }
 
-void get_time(lcd_msg* lcd_show_msg)
+void get_time(_time_profile* t_profile)
 {
   time_t t = now();
-  lcd_show_msg->hours = hour(t);
-  lcd_show_msg->mins = minute(t);
-  lcd_show_msg->secs = second(t);
+  t_profile->hours = hour(t);
+  t_profile->mins = minute(t);
+  t_profile->secs = second(t);
 }
 
 void loop()
@@ -229,18 +232,26 @@ void loop()
   // Delay between measurements.
   lcd_show_msg.dht_det_status = detect_temperature_humidity(&lcd_show_msg.temperature, &lcd_show_msg.humidity);
 
-  if (!lcd_show_msg.dht_det_status) {
-    lcd_show_msg.temperature = 8888;
-    lcd_show_msg.humidity = 8888;
+  while (1) {
+    time_profile.current_sample_time = now();
+    if (time_profile.current_sample_time - time_profile.last_sample_time >= 2) {
+      lcd_show_msg.dht_det_status = detect_temperature_humidity(&lcd_show_msg.temperature, &lcd_show_msg.humidity);
+      time_profile.last_sample_time = time_profile.current_sample_time;
+    }
+
+    if (!lcd_show_msg.dht_det_status) {
+      lcd_show_msg.temperature = 8888;
+      lcd_show_msg.humidity = 8888;
+    }
+
+    get_time(&time_profile);
+    show_in_lcd(&lcd_show_msg, &time_profile);
+
+    lcd_show_msg.lcd_stage = lcd_show_msg.lcd_stage + 1;
+    if (lcd_show_msg.lcd_stage >= lcd_stage_max) {
+      lcd_show_msg.lcd_stage = lcd_stage_info;
+    }
+
+    //delay(1000);
   }
-
-  get_time(&lcd_show_msg);
-  show_in_lcd(&lcd_show_msg);
-
-  lcd_show_msg.lcd_stage = lcd_show_msg.lcd_stage + 1;
-  if (lcd_show_msg.lcd_stage >= lcd_stage_max) {
-    lcd_show_msg.lcd_stage = 0;
-  }
-
-  delay(1000);
 }
