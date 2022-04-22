@@ -8,6 +8,29 @@
 #define DS1302_SDA              9
 #define DS1302_RST              8
 
+#include "DHT.h"
+#define DHT_DATA_PIN            7
+#define DHT_PWR_PIN             6
+#define DHTTYPE                 DHT11
+
+#define BTN_0_PIN               5
+#define BTN_1_PIN               4
+
+#define INTERVAL_LCD_CLK        10000
+#define INTERVAL_DHT            10000
+#define INTERVAL_BTN            100
+
+unsigned long time_lcd = 0;
+unsigned long time_dht = 0;
+unsigned long time_btn = 0;
+
+unsigned int delay_cnt;
+unsigned char lcd_state;
+unsigned char lcd_content_change;
+RtcDateTime rtc_date_time;
+
+DHT dht(DHT_DATA_PIN, DHTTYPE);
+
 ThreeWire myWire(DS1302_SDA, DS1302_SCL, DS1302_RST);
 RtcDS1302<ThreeWire> Rtc(myWire);
 
@@ -167,6 +190,42 @@ void rtc_init()
     }
 }
 
+void dht_init()
+{
+    pinMode(DHT_PWR_PIN, OUTPUT);
+    digitalWrite(DHT_PWR_PIN, HIGH);
+    Serial.println("DHTxx test!");
+    dht.begin();
+}
+
+void btn_press_init()
+{
+    pinMode(BTN_0_PIN, INPUT);
+    pinMode(BTN_1_PIN, INPUT);
+}
+
+void dht_proc()
+{
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+
+    Serial.print("Humidity: ");
+    Serial.print(h);
+    Serial.print(" %\t");
+    Serial.print("Temperature: ");
+    Serial.print(t);
+    Serial.println(" oC ");
+}
+
+void button_press_proc()
+{
+    int button_state = digitalRead(BTN_0_PIN);
+#if 1
+    Serial.print("Button status ");
+    Serial.println(button_state ? "HIGH" : "LOW");
+#endif
+}
+
 void setup ()
 {
     Serial.begin(9600);
@@ -175,47 +234,75 @@ void setup ()
     delay(800);
 
     rtc_init();
+    dht_init();
+    btn_press_init();
+
+    delay_cnt = 0;
+    lcd_state = 0;
+
+    rtc_get_time(&rtc_date_time);
+    lcd_content_change = 1;
+}
+
+void rtc_get_time(RtcDateTime *rtc_date_time)
+{
+    *rtc_date_time = Rtc.GetDateTime();
+
+    printDateTime(*rtc_date_time);
+    Serial.println();
+
+    if (!rtc_date_time->IsValid()) {
+        Serial.println("RTC lost confidence in the DateTime!");
+    }
 }
 
 void loop ()
 {
-    RtcDateTime now = Rtc.GetDateTime();
+    if(millis() > time_lcd + INTERVAL_LCD_CLK) {
+        time_lcd = millis();
 
-    printDateTime(now);
-    Serial.println();
-
-    //判斷DS1302是否正常，如果不正常，一般是線沒接好，或是電池沒電了
-    if (!now.IsValid()) {
-        Serial.println("RTC lost confidence in the DateTime!");
+        rtc_get_time(&rtc_date_time);
+        lcd_content_change = 1;
     }
 
-    lcd.clear(); //清除畫面
-
-    //如果12點以後，就顯示PM，否則顯示AM
-    if(now.Hour()>11) {
-        lcd.setCursor(0, 0);
-        lcd.print("P");
-        lcd.setCursor(0, 1);
-        lcd.print("M");
-    } else {
-        lcd.setCursor(0, 0);
-        lcd.print("A");
-        lcd.setCursor(0, 1);
-        lcd.print("M");
+    if (millis() - time_dht > INTERVAL_DHT) {
+        time_dht = millis();
+        dht_proc();
     }
 
-    //組合要顯示在LCD上的時間
-    char datestring[10];
+    if (millis() - time_btn > INTERVAL_BTN) {
+        time_btn = millis();
+        button_press_proc();
+    }
 
-    snprintf_P(datestring,
-               10,
-               PSTR("%02u:%02u"),
-               now.Hour(),
-               now.Minute());
+    if (lcd_content_change) {
+        lcd_content_change = 0;
+        lcd.clear();
 
-    writeBigString(datestring, 3, 0);
+        //如果12點以後，就顯示PM，否則顯示AM
+        if(rtc_date_time.Hour()>11) {
+            lcd.setCursor(0, 0);
+            lcd.print("P");
+            lcd.setCursor(0, 1);
+            lcd.print("M");
+        } else {
+            lcd.setCursor(0, 0);
+            lcd.print("A");
+            lcd.setCursor(0, 1);
+            lcd.print("M");
+        }
 
-    delay(10000); // 10秒更新一次
+        //組合要顯示在LCD上的時間
+        char datestring[10];
+
+        snprintf_P(datestring,
+                   10,
+                   PSTR("%02u:%02u"),
+                   rtc_date_time.Hour(),
+                   rtc_date_time.Minute());
+
+        writeBigString(datestring, 3, 0);
+    }
 }
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
