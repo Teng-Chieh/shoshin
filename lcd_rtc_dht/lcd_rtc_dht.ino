@@ -3,12 +3,16 @@
 
 #include <ThreeWire.h>
 #include <RtcDS1302.h>
+#include "DHT.h"
+
+typedef unsigned long           u32;
+typedef unsigned short          u16;
+typedef unsigned char           u8;
 
 #define DS1302_SCL              10
 #define DS1302_SDA              9
 #define DS1302_RST              8
 
-#include "DHT.h"
 #define DHT_DATA_PIN            7
 #define DHT_PWR_PIN             6
 #define DHTTYPE                 DHT11
@@ -20,13 +24,28 @@
 #define INTERVAL_DHT            10000
 #define INTERVAL_BTN            100
 
-unsigned long time_lcd = 0;
-unsigned long time_dht = 0;
-unsigned long time_btn = 0;
+typedef enum {
+    LCD_STATE_MODE_0,
+    LCD_STATE_MODE_1,
+    LCD_STATE_MODE_MAX,
+} LCD_STATE_E;
 
-unsigned int delay_cnt;
-unsigned char lcd_state;
-unsigned char lcd_content_change;
+typedef struct {
+    u8 lcd_state;
+    u8 lcd_update;
+} lcd_ctl_st;
+
+typedef struct {
+    u32 time_lcd;
+    u32 time_dht;
+    u32 time_btn;
+} time_update_st;
+
+lcd_ctl_st lcd_ctl;
+time_update_st time_update;
+
+unsigned char button_state;
+
 RtcDateTime rtc_date_time;
 
 DHT dht(DHT_DATA_PIN, DHTTYPE);
@@ -217,12 +236,31 @@ void dht_proc()
     Serial.println(" oC ");
 }
 
+void lcd_mode_change()
+{
+    lcd_ctl.lcd_state++;
+    if (lcd_ctl.lcd_state >= LCD_STATE_MODE_MAX) {
+        lcd_ctl.lcd_state = LCD_STATE_MODE_0;
+    }
+    lcd_ctl.lcd_update = 1;
+}
+
 void button_press_proc()
 {
-    int button_state = digitalRead(BTN_0_PIN);
+    unsigned char btn_det = digitalRead(BTN_0_PIN);
+
+    if (btn_det != button_state) {
+        if (btn_det == LOW) {
+            lcd_mode_change();
+        }
+
+        button_state = btn_det;
+    }
 #if 1
     Serial.print("Button status ");
-    Serial.println(button_state ? "HIGH" : "LOW");
+    Serial.print(btn_det ? "HIGH" : "LOW");
+    Serial.print(" lcd_mode ");
+    Serial.println(lcd_ctl.lcd_state);
 #endif
 }
 
@@ -237,11 +275,10 @@ void setup ()
     dht_init();
     btn_press_init();
 
-    delay_cnt = 0;
-    lcd_state = 0;
+    lcd_ctl.lcd_state = LCD_STATE_MODE_0;
 
     rtc_get_time(&rtc_date_time);
-    lcd_content_change = 1;
+    lcd_ctl.lcd_update = 1;
 }
 
 void rtc_get_time(RtcDateTime *rtc_date_time)
@@ -258,50 +295,62 @@ void rtc_get_time(RtcDateTime *rtc_date_time)
 
 void loop ()
 {
-    if(millis() > time_lcd + INTERVAL_LCD_CLK) {
-        time_lcd = millis();
+    if(millis() > time_update.time_lcd + INTERVAL_LCD_CLK) {
+        time_update.time_lcd = millis();
 
         rtc_get_time(&rtc_date_time);
-        lcd_content_change = 1;
+
+        if (lcd_ctl.lcd_state == LCD_STATE_MODE_0) {
+            lcd_ctl.lcd_update = 1;
+        }
     }
 
-    if (millis() - time_dht > INTERVAL_DHT) {
-        time_dht = millis();
+    if (millis() - time_update.time_dht > INTERVAL_DHT) {
+        time_update.time_dht = millis();
         dht_proc();
     }
 
-    if (millis() - time_btn > INTERVAL_BTN) {
-        time_btn = millis();
+    if (millis() - time_update.time_btn > INTERVAL_BTN) {
+        time_update.time_btn = millis();
         button_press_proc();
     }
 
-    if (lcd_content_change) {
-        lcd_content_change = 0;
+    if (lcd_ctl.lcd_update) {
+        lcd_ctl.lcd_update = 0;
+
         lcd.clear();
 
-        //如果12點以後，就顯示PM，否則顯示AM
-        if(rtc_date_time.Hour()>11) {
-            lcd.setCursor(0, 0);
-            lcd.print("P");
-            lcd.setCursor(0, 1);
-            lcd.print("M");
+        if (lcd_ctl.lcd_state == LCD_STATE_MODE_0) {
+
+            //如果12點以後，就顯示PM，否則顯示AM
+            if(rtc_date_time.Hour()>11) {
+                lcd.setCursor(0, 0);
+                lcd.print("P");
+                lcd.setCursor(0, 1);
+                lcd.print("M");
+            } else {
+                lcd.setCursor(0, 0);
+                lcd.print("A");
+                lcd.setCursor(0, 1);
+                lcd.print("M");
+            }
+
+            //組合要顯示在LCD上的時間
+            char datestring[10];
+
+            snprintf_P(datestring,
+                       10,
+                       PSTR("%02u:%02u"),
+                       rtc_date_time.Hour(),
+                       rtc_date_time.Minute());
+
+            writeBigString(datestring, 3, 0);
         } else {
             lcd.setCursor(0, 0);
-            lcd.print("A");
+            lcd.print("NNNNNNNN");
             lcd.setCursor(0, 1);
-            lcd.print("M");
+            lcd.print("YYYYYYYY");
         }
-
-        //組合要顯示在LCD上的時間
-        char datestring[10];
-
-        snprintf_P(datestring,
-                   10,
-                   PSTR("%02u:%02u"),
-                   rtc_date_time.Hour(),
-                   rtc_date_time.Minute());
-
-        writeBigString(datestring, 3, 0);
     }
 }
 
