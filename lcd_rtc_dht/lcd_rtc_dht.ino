@@ -270,7 +270,7 @@ void setup ()
     dht_init();
     btn_press_init();
 
-    lcd_ctl.lcd_state = LCD_STATE_MODE_2;
+    lcd_ctl.lcd_state = LCD_STATE_MODE_0;
 
     rtc_get_time(&rtc_date_time);
     lcd_processing_update_time(rtc_date_time);
@@ -425,14 +425,14 @@ void lcd_processing_proc()
 
                 if(lcd_ctl.lcd_rtc_time.hour > 11) {
                     lcd.setCursor(0, 0);
-                    lcd.print("P  ");
+                    lcd.print("P");
                     lcd.setCursor(0, 1);
-                    lcd.print("M  ");
+                    lcd.print("M");
                 } else {
                     lcd.setCursor(0, 0);
-                    lcd.print("A  ");
+                    lcd.print("A");
                     lcd.setCursor(0, 1);
-                    lcd.print("M  ");
+                    lcd.print("M");
                 }
 
                 char datestring[10];
@@ -443,7 +443,10 @@ void lcd_processing_proc()
                            lcd_ctl.lcd_rtc_time.hour,
                            lcd_ctl.lcd_rtc_time.minute);
 
-                writeBigString(datestring, 3, 0);
+                writeBigString(datestring, 1, 0);
+
+                lcd.setCursor(14, 1);
+                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.second);
                 break;
             case LCD_STATE_MODE_1:
 
