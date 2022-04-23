@@ -5,10 +5,6 @@
 #include <RtcDS1302.h>
 #include "DHT.h"
 
-typedef unsigned long           u32;
-typedef unsigned short          u16;
-typedef unsigned char           u8;
-
 #define DS1302_SCL              10
 #define DS1302_SDA              9
 #define DS1302_RST              8
@@ -20,17 +16,34 @@ typedef unsigned char           u8;
 #define BTN_0_PIN               5
 #define BTN_1_PIN               4
 
-#define INTERVAL_LCD_CLK        10000
-#define INTERVAL_DHT            10000
+#define INTERVAL_GET_TIME       500
+#define INTERVAL_DHT            500
 #define INTERVAL_BTN            100
 
 typedef enum {
     LCD_STATE_MODE_0,
     LCD_STATE_MODE_1,
+    LCD_STATE_MODE_2,
     LCD_STATE_MODE_MAX,
 } LCD_STATE_E;
 
 typedef struct {
+    u16 year;
+    u8 month;
+    u8 day;
+    u8 hour;
+    u8 minute;
+    u8 second;
+} rtc_time_st;
+
+typedef struct {
+    float temperature;
+    float humidity;
+} dht_data_st;
+
+typedef struct {
+    rtc_time_st lcd_rtc_time;
+    dht_data_st lcd_dht_data;
     u8 lcd_state;
     u8 lcd_update;
 } lcd_ctl_st;
@@ -41,22 +54,22 @@ typedef struct {
     u32 time_btn;
 } time_update_st;
 
-lcd_ctl_st lcd_ctl;
-time_update_st time_update;
+typedef struct {
+    u8 button_state;
+} btn_ctl_st;
 
-unsigned char button_state;
+lcd_ctl_st lcd_ctl;
+btn_ctl_st btn_ctl;
+time_update_st time_update;
 
 RtcDateTime rtc_date_time;
 
 DHT dht(DHT_DATA_PIN, DHTTYPE);
 
+LiquidCrystal_PCF8574 lcd(0x27); // set lcd slave addr, 0x27 or 0x3F
 ThreeWire myWire(DS1302_SDA, DS1302_SCL, DS1302_RST);
 RtcDS1302<ThreeWire> Rtc(myWire);
 
-LiquidCrystal_PCF8574 lcd(0x27); // set lcd slave addr, 0x27 or 0x3F
-
-//以下是大字型的設定
-//數字的字型設定
 const char custom[][8] PROGMEM = {                        // Custom character definitions
     { 0x1F, 0x1F, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00 }, // char 1
     { 0x18, 0x1C, 0x1E, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F }, // char 2
@@ -68,7 +81,6 @@ const char custom[][8] PROGMEM = {                        // Custom character de
     { 0x03, 0x07, 0x0F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F }  // char 8
 };
 
-//文字和符號的設定
 const char bigChars[][8] PROGMEM = {
     { 0x20, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // Space
     { 0xFF, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // !
@@ -135,30 +147,24 @@ const char bigChars[][8] PROGMEM = {
     { 0x08, 0x02, 0x20, 0x20, 0x00, 0x00, 0x00, 0x00 }, // ^
     { 0x20, 0x20, 0x20, 0x04, 0x04, 0x04, 0x00, 0x00 }  // _
 };
+
 byte col, row, nb = 0, bc = 0;                            // general
-//int bb[8];  // 若編譯出現錯誤，請用這行
 byte bb[8];
 
 void lcd_init()
 {
-    lcd.begin(16, 2);  //16x2的LCD
-    //lcd.begin(20, 4); //20x4的LCD
-    lcd.setBacklight(1); // lcd back lightlight 0-255
+    lcd.begin(16, 2);           // 16 * 2 LCD
+    //lcd.begin(20, 4);         // 20 * 4 LCD
+    lcd.setBacklight(1);        // lcd back lightlight 0-255
 
-    //建立大字型
-    for (nb = 0; nb < 8; nb++ ) {                 // create 8 custom characters
+    // create 8 custom characters
+    for (nb = 0; nb < 8; nb++ ) {
         for (bc = 0; bc < 8; bc++) bb[bc] = pgm_read_byte( &custom[nb][bc] );
         lcd.createChar ( nb + 1, bb );
     }
 
-    lcd.clear(); //清除畫面
-
-    //writeBigString(要顯示的字串,第幾個字,行：第1行是0，第2行是1)
-    //請注意，因為大字型2行才能顯示1個字，所以行1，就是指正常的1~2行，
-    //16x2的LCD只能顯示1行大字型
-    //如果用的是20x4的LCD，第二行大字型，就是行2
-
-    writeBigString("JMKAER", 0, 0); //測試顯示大字型
+    lcd.clear();
+    writeBigString("RYAN", 0, 0);
 }
 
 void rtc_init()
@@ -169,12 +175,10 @@ void rtc_init()
 
     Rtc.Begin();
 
-    //__DATE__，__TIME__，是程式碼編譯時的日期和時間
     RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
     printDateTime(compiled);
     Serial.println();
 
-    //判斷DS1302是否接好
     if (!Rtc.IsDateTimeValid()) {
         // Common Causes:
         //    1) first time you ran and the device wasn't running yet
@@ -194,13 +198,9 @@ void rtc_init()
         Rtc.SetIsRunning(true);
     }
 
-    //判斷DS1302上紀綠的時間和編譯時的時間，哪個比較新
-    //如果編譯時間比較新，就進行設定，把DS1302上的時間改成新的時間
-    //now：DS1302上紀綠的時間，compiled：編譯時的時間
     RtcDateTime now = Rtc.GetDateTime();
     if (now < compiled) {
         Serial.println("RTC is older than compile time!  (Updating DateTime)");
-        //編譯時間比較新，把DS1302上的時間改成編譯的時間
         Rtc.SetDateTime(compiled);
     } else if (now > compiled) {
         Serial.println("RTC is newer than compile time. (this is expected)");
@@ -228,35 +228,30 @@ void dht_proc()
     float h = dht.readHumidity();
     float t = dht.readTemperature();
 
+#if 0
     Serial.print("Humidity: ");
     Serial.print(h);
     Serial.print(" %\t");
     Serial.print("Temperature: ");
     Serial.print(t);
     Serial.println(" oC ");
-}
+#endif
 
-void lcd_mode_change()
-{
-    lcd_ctl.lcd_state++;
-    if (lcd_ctl.lcd_state >= LCD_STATE_MODE_MAX) {
-        lcd_ctl.lcd_state = LCD_STATE_MODE_0;
-    }
-    lcd_ctl.lcd_update = 1;
+    lcd_processing_update_dht_data(t, h);
 }
 
 void button_press_proc()
 {
     unsigned char btn_det = digitalRead(BTN_0_PIN);
 
-    if (btn_det != button_state) {
+    if (btn_det != btn_ctl.button_state) {
         if (btn_det == LOW) {
-            lcd_mode_change();
+            lcd_processing_mode_change();
         }
 
-        button_state = btn_det;
+        btn_ctl.button_state = btn_det;
     }
-#if 1
+#if 0
     Serial.print("Button status ");
     Serial.print(btn_det ? "HIGH" : "LOW");
     Serial.print(" lcd_mode ");
@@ -275,9 +270,11 @@ void setup ()
     dht_init();
     btn_press_init();
 
-    lcd_ctl.lcd_state = LCD_STATE_MODE_0;
+    lcd_ctl.lcd_state = LCD_STATE_MODE_2;
 
     rtc_get_time(&rtc_date_time);
+    lcd_processing_update_time(rtc_date_time);
+
     lcd_ctl.lcd_update = 1;
 }
 
@@ -285,8 +282,10 @@ void rtc_get_time(RtcDateTime *rtc_date_time)
 {
     *rtc_date_time = Rtc.GetDateTime();
 
+#if 0
     printDateTime(*rtc_date_time);
     Serial.println();
+#endif
 
     if (!rtc_date_time->IsValid()) {
         Serial.println("RTC lost confidence in the DateTime!");
@@ -295,12 +294,13 @@ void rtc_get_time(RtcDateTime *rtc_date_time)
 
 void loop ()
 {
-    if(millis() > time_update.time_lcd + INTERVAL_LCD_CLK) {
+    if(millis() > time_update.time_lcd + INTERVAL_GET_TIME) {
         time_update.time_lcd = millis();
 
         rtc_get_time(&rtc_date_time);
+        lcd_processing_update_time(rtc_date_time);
 
-        if (lcd_ctl.lcd_state == LCD_STATE_MODE_0) {
+        if (lcd_ctl.lcd_state == LCD_STATE_MODE_0 || lcd_ctl.lcd_state == LCD_STATE_MODE_2) {
             lcd_ctl.lcd_update = 1;
         }
     }
@@ -308,6 +308,10 @@ void loop ()
     if (millis() - time_update.time_dht > INTERVAL_DHT) {
         time_update.time_dht = millis();
         dht_proc();
+
+        if (lcd_ctl.lcd_state == LCD_STATE_MODE_1) {
+            lcd_ctl.lcd_update = 1;
+        }
     }
 
     if (millis() - time_update.time_btn > INTERVAL_BTN) {
@@ -315,48 +319,11 @@ void loop ()
         button_press_proc();
     }
 
-    if (lcd_ctl.lcd_update) {
-        lcd_ctl.lcd_update = 0;
-
-        lcd.clear();
-
-        if (lcd_ctl.lcd_state == LCD_STATE_MODE_0) {
-
-            //如果12點以後，就顯示PM，否則顯示AM
-            if(rtc_date_time.Hour()>11) {
-                lcd.setCursor(0, 0);
-                lcd.print("P");
-                lcd.setCursor(0, 1);
-                lcd.print("M");
-            } else {
-                lcd.setCursor(0, 0);
-                lcd.print("A");
-                lcd.setCursor(0, 1);
-                lcd.print("M");
-            }
-
-            //組合要顯示在LCD上的時間
-            char datestring[10];
-
-            snprintf_P(datestring,
-                       10,
-                       PSTR("%02u:%02u"),
-                       rtc_date_time.Hour(),
-                       rtc_date_time.Minute());
-
-            writeBigString(datestring, 3, 0);
-        } else {
-            lcd.setCursor(0, 0);
-            lcd.print("NNNNNNNN");
-            lcd.setCursor(0, 1);
-            lcd.print("YYYYYYYY");
-        }
-    }
+    lcd_processing_proc();
 }
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 
-//顯示完整年月日時間的副程式
 void printDateTime(const RtcDateTime& dt)
 {
     char datestring[20];
@@ -374,14 +341,13 @@ void printDateTime(const RtcDateTime& dt)
 }
 
 
-//以下是處理大字型的副程式
 // writeBigChar: writes big character 'ch' to column x, row y; returns number of columns used by 'ch'
 int writeBigChar(char ch, byte x, byte y)
 {
-    if (ch < ' ' || ch > '_') return 0;               // If outside table range, do nothing
-    nb = 0;                                           // character byte counter
+    if (ch < ' ' || ch > '_') return 0;                     // If outside table range, do nothing
+    nb = 0;                                                 // character byte counter
     for (bc = 0; bc < 8; bc++) {
-        bb[bc] = pgm_read_byte( &bigChars[ch - ' '][bc] ); // read 8 bytes from PROGMEM
+        bb[bc] = pgm_read_byte( &bigChars[ch - ' '][bc] );  // read 8 bytes from PROGMEM
         if (bb[bc] != 0) nb++;
     }
 
@@ -422,3 +388,136 @@ int freeRam(void)
     return free_memory;
 }
 
+void lcd_processing_update_dht_data(float t, float h)
+{
+    lcd_ctl.lcd_dht_data.temperature = t;
+    lcd_ctl.lcd_dht_data.humidity = h;
+}
+
+void lcd_processing_update_time(const RtcDateTime& dt)
+{
+    lcd_ctl.lcd_rtc_time.year = dt.Year();
+    lcd_ctl.lcd_rtc_time.month = dt.Month();
+    lcd_ctl.lcd_rtc_time.day = dt.Day();
+    lcd_ctl.lcd_rtc_time.hour = dt.Hour();
+    lcd_ctl.lcd_rtc_time.minute = dt.Minute();
+    lcd_ctl.lcd_rtc_time.second = dt.Second();
+}
+
+void lcd_processing_mode_change()
+{
+    lcd_ctl.lcd_state++;
+    if (lcd_ctl.lcd_state >= LCD_STATE_MODE_MAX) {
+        lcd_ctl.lcd_state = LCD_STATE_MODE_0;
+    }
+    lcd_ctl.lcd_update = 1;
+
+    lcd.clear();
+}
+
+void lcd_processing_proc()
+{
+    if (lcd_ctl.lcd_update) {
+        lcd_ctl.lcd_update = 0;
+
+        switch (lcd_ctl.lcd_state) {
+            case LCD_STATE_MODE_0:
+
+                if(lcd_ctl.lcd_rtc_time.hour > 11) {
+                    lcd.setCursor(0, 0);
+                    lcd.print("P  ");
+                    lcd.setCursor(0, 1);
+                    lcd.print("M  ");
+                } else {
+                    lcd.setCursor(0, 0);
+                    lcd.print("A  ");
+                    lcd.setCursor(0, 1);
+                    lcd.print("M  ");
+                }
+
+                char datestring[10];
+
+                snprintf_P(datestring,
+                           10,
+                           PSTR("%02u:%02u"),
+                           lcd_ctl.lcd_rtc_time.hour,
+                           lcd_ctl.lcd_rtc_time.minute);
+
+                writeBigString(datestring, 3, 0);
+                break;
+            case LCD_STATE_MODE_1:
+
+                lcd.setCursor(0, 0);
+                lcd.print("Temp:  ");
+
+                lcd.setCursor(7, 0);
+                lcd.print(lcd_ctl.lcd_dht_data.temperature);
+
+                lcd.setCursor(12, 0);
+                lcd.print(" ");
+
+                lcd.setCursor(13, 0);
+                lcd.print((char)223);
+
+                lcd.setCursor(14, 0);
+                lcd.print("C ");
+
+                lcd.setCursor(0, 1);
+                lcd.print("RH  :  ");
+
+                lcd.setCursor(7, 1);
+                lcd.print(lcd_ctl.lcd_dht_data.humidity);
+
+                lcd.setCursor(12, 1);
+                lcd.print("  ");
+
+                lcd.setCursor(14, 1);
+                lcd.print("%");
+                break;
+
+            case LCD_STATE_MODE_2:
+                //Year
+                lcd.setCursor(0, 0);
+                lcd.print(lcd_ctl.lcd_rtc_time.year);
+                lcd.print("/");
+                //month
+                lcd.setCursor(5, 0);
+                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.month);
+                lcd.print("/");
+                //day
+                lcd.setCursor(8, 0);
+                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.day);
+                //
+                lcd.setCursor(10, 0);
+                lcd.print("      ");
+                //hour
+                lcd.setCursor(0, 1);
+                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.hour);
+                lcd.print(":");
+                //minute
+                lcd.setCursor(3, 1);
+                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.minute);
+                lcd.print(":");
+                //second
+                lcd.setCursor(6, 1);
+                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.second);
+                //
+                lcd.setCursor(8, 1);
+                lcd.print("        ");
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+void __lcd_print_datetime(uint32_t val)
+{
+    if (val < 10) {
+        lcd.print("0");
+        lcd.print(val);
+    } else {
+        lcd.print(val);
+    }
+}
