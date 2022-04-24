@@ -5,20 +5,49 @@
 #include <RtcDS1302.h>
 #include "DHT.h"
 
-#define DS1302_SCL              10
-#define DS1302_SDA              9
-#define DS1302_RST              8
+#define DS1302_SCL              12
+#define DS1302_SDA              11
+#define DS1302_RST              10
 
-#define DHT_DATA_PIN            7
-#define DHT_PWR_PIN             6
+#define DHT_DATA_PIN            9
 #define DHTTYPE                 DHT11
 
-#define BTN_0_PIN               5
-#define BTN_1_PIN               4
+#define BTN_0_PIN               8
+#define BTN_1_PIN               7
 
 #define INTERVAL_GET_TIME       500
 #define INTERVAL_DHT            500
 #define INTERVAL_BTN            100
+
+#define LED_1_PIN               3
+#define LED_2_PIN               4
+#define LED_3_PIN               5
+#define LED_4_PIN               6
+#define LED_5_PIN               A3
+#define LED_6_PIN               A2
+#define LED_7_PIN               A1
+#define LED_8_PIN               A0
+
+#define LED_INTERVAL_MODE_0     1000
+#define LED_INTERVAL_MODE_1     500
+#define LED_INTERVAL_MODE_2     250
+#define LED_INTERVAL_MODE_3     125
+#define LED_INTERVAL_MODE_4     60
+#define LED_INTERVAL_MODE_5     30
+#define LED_INTERVAL_MODE_6     15
+#define LED_INTERVAL_MODE_7     8
+
+typedef enum {
+    LED_MODE_0,
+    LED_MODE_1,
+    LED_MODE_2,
+    LED_MODE_3,
+    LED_MODE_4,
+    LED_MODE_5,
+    LED_MODE_6,
+    LED_MODE_7,
+    LED_MODE_MAX,
+} LED_MODE_E;
 
 typedef enum {
     LCD_STATE_MODE_0,
@@ -52,14 +81,24 @@ typedef struct {
     u32 time_lcd;
     u32 time_dht;
     u32 time_btn;
+    u32 time_led;
 } time_update_st;
 
 typedef struct {
-    u8 button_state;
+    u8 btn_0_state;
+    u8 btn_1_state;
 } btn_ctl_st;
+
+typedef struct {
+    u8 mode;
+    u16 interval;
+    u8 is_down;
+    u8 val;
+} led_ctl_st;
 
 lcd_ctl_st lcd_ctl;
 btn_ctl_st btn_ctl;
+led_ctl_st led_ctl;
 time_update_st time_update;
 
 RtcDateTime rtc_date_time;
@@ -167,6 +206,29 @@ void lcd_init()
     writeBigString("RYAN", 0, 0);
 }
 
+void led_init()
+{
+    led_ctl.interval = LED_INTERVAL_MODE_0;
+
+    pinMode(LED_1_PIN, OUTPUT);
+    pinMode(LED_2_PIN, OUTPUT);
+    pinMode(LED_3_PIN, OUTPUT);
+    pinMode(LED_4_PIN, OUTPUT);
+    pinMode(LED_5_PIN, OUTPUT);
+    pinMode(LED_6_PIN, OUTPUT);
+    pinMode(LED_7_PIN, OUTPUT);
+    pinMode(LED_8_PIN, OUTPUT);
+
+    digitalWrite(LED_1_PIN, HIGH);
+    digitalWrite(LED_2_PIN, HIGH);
+    digitalWrite(LED_3_PIN, HIGH);
+    digitalWrite(LED_4_PIN, HIGH);
+    digitalWrite(LED_5_PIN, HIGH);
+    digitalWrite(LED_6_PIN, HIGH);
+    digitalWrite(LED_7_PIN, HIGH);
+    digitalWrite(LED_8_PIN, HIGH);
+}
+
 void rtc_init()
 {
     Serial.print("compiled: ");
@@ -211,8 +273,6 @@ void rtc_init()
 
 void dht_init()
 {
-    pinMode(DHT_PWR_PIN, OUTPUT);
-    digitalWrite(DHT_PWR_PIN, HIGH);
     Serial.println("DHTxx test!");
     dht.begin();
 }
@@ -242,15 +302,29 @@ void dht_proc()
 
 void button_press_proc()
 {
-    unsigned char btn_det = digitalRead(BTN_0_PIN);
+    unsigned char btn_det;
 
-    if (btn_det != btn_ctl.button_state) {
+    btn_det = digitalRead(BTN_0_PIN);
+    if (btn_det != btn_ctl.btn_0_state) {
         if (btn_det == LOW) {
             lcd_processing_mode_change();
         }
 
-        btn_ctl.button_state = btn_det;
+        btn_ctl.btn_0_state = btn_det;
     }
+
+
+    btn_det = digitalRead(BTN_1_PIN);
+    if (btn_det != btn_ctl.btn_1_state) {
+        if (btn_det == LOW) {
+            led_change_mode();
+        }
+
+        btn_ctl.btn_1_state = btn_det;
+    }
+
+
+
 #if 0
     Serial.print("Button status ");
     Serial.print(btn_det ? "HIGH" : "LOW");
@@ -259,9 +333,90 @@ void button_press_proc()
 #endif
 }
 
+void led_change_mode()
+{
+    led_ctl.mode++;
+    if (led_ctl.mode >= LED_MODE_MAX) {
+        led_ctl.mode = LED_MODE_0;
+    }
+
+    switch (led_ctl.mode) {
+        case LED_MODE_0:
+            led_ctl.interval = LED_INTERVAL_MODE_0;
+            break;
+        case LED_MODE_1:
+            led_ctl.interval = LED_INTERVAL_MODE_1;
+            break;
+        case LED_MODE_2:
+            led_ctl.interval = LED_INTERVAL_MODE_2;
+            break;
+        case LED_MODE_3:
+            led_ctl.interval = LED_INTERVAL_MODE_3;
+            break;
+        case LED_MODE_4:
+            led_ctl.interval = LED_INTERVAL_MODE_4;
+            break;
+        case LED_MODE_5:
+            led_ctl.interval = LED_INTERVAL_MODE_5;
+            break;
+        case LED_MODE_6:
+            led_ctl.interval = LED_INTERVAL_MODE_6;
+            break;
+        case LED_MODE_7:
+            led_ctl.interval = LED_INTERVAL_MODE_7;
+            break;
+        default:
+            led_ctl.interval = LED_INTERVAL_MODE_0;
+            break;
+    }
+#if 0
+    Serial.print("LED MODE ");
+    Serial.print(led_ctl.mode);
+    Serial.print(" LED INTERVAL ");
+    Serial.println(led_ctl.interval);
+#endif
+}
+
+void led_proc()
+{
+    if (led_ctl.val == 0) {
+        led_ctl.val += 1;
+    } else {
+        if (!led_ctl.is_down) {
+            led_ctl.val <<= 1;
+            if (led_ctl.val & (0x1 << 7)) {
+                led_ctl.is_down = 1;
+            }
+        } else {
+            led_ctl.val >>= 1;
+            if (led_ctl.val & 0x1) {
+                led_ctl.is_down = 0;
+            }
+        }
+    }
+
+    digitalWrite(LED_1_PIN, led_ctl.val & (0x1 << 0) ? LOW : HIGH);
+    digitalWrite(LED_2_PIN, led_ctl.val & (0x1 << 1) ? LOW : HIGH);
+    digitalWrite(LED_3_PIN, led_ctl.val & (0x1 << 2) ? LOW : HIGH);
+    digitalWrite(LED_4_PIN, led_ctl.val & (0x1 << 3) ? LOW : HIGH);
+    digitalWrite(LED_5_PIN, led_ctl.val & (0x1 << 4) ? LOW : HIGH);
+    digitalWrite(LED_6_PIN, led_ctl.val & (0x1 << 5) ? LOW : HIGH);
+    digitalWrite(LED_7_PIN, led_ctl.val & (0x1 << 6) ? LOW : HIGH);
+    digitalWrite(LED_8_PIN, led_ctl.val & (0x1 << 7) ? LOW : HIGH);
+#if 0
+    Serial.println(led_ctl.is_down);
+    Serial.println(led_ctl.val);
+#endif
+}
+
 void setup ()
 {
     Serial.begin(9600);
+
+    memset(&time_update, 0, sizeof(time_update_st));
+    memset(&lcd_ctl, 0, sizeof(lcd_ctl_st));
+    memset(&btn_ctl, 0, sizeof(btn_ctl_st));
+    memset(&led_ctl, 0, sizeof(led_ctl_st));
 
     lcd_init();
     delay(800);
@@ -276,6 +431,8 @@ void setup ()
     lcd_processing_update_time(rtc_date_time);
 
     lcd_ctl.lcd_update = 1;
+
+    led_init();
 }
 
 void rtc_get_time(RtcDateTime *rtc_date_time)
@@ -317,6 +474,11 @@ void loop ()
     if (millis() - time_update.time_btn > INTERVAL_BTN) {
         time_update.time_btn = millis();
         button_press_proc();
+    }
+
+    if (millis() - time_update.time_led > led_ctl.interval) {
+        time_update.time_led = millis();
+        led_proc();
     }
 
     lcd_processing_proc();
@@ -417,6 +579,9 @@ void lcd_processing_mode_change()
 
 void lcd_processing_proc()
 {
+    char temp[16];
+    char temp_1[4];
+
     if (lcd_ctl.lcd_update) {
         lcd_ctl.lcd_update = 0;
 
@@ -435,78 +600,62 @@ void lcd_processing_proc()
                     lcd.print("M");
                 }
 
-                char datestring[10];
-
-                snprintf_P(datestring,
-                           10,
+                snprintf_P(temp,
+                           sizeof(temp),
                            PSTR("%02u:%02u"),
-                           lcd_ctl.lcd_rtc_time.hour,
+                           lcd_ctl.lcd_rtc_time.hour > 12 ? lcd_ctl.lcd_rtc_time.hour - 12 : lcd_ctl.lcd_rtc_time.hour,
                            lcd_ctl.lcd_rtc_time.minute);
+                writeBigString(temp, 1, 0);
 
-                writeBigString(datestring, 1, 0);
-
+                snprintf_P(temp,
+                           sizeof(temp),
+                           PSTR("%02d"),
+                           lcd_ctl.lcd_rtc_time.second);
                 lcd.setCursor(14, 1);
-                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.second);
+                lcd.print(temp);
                 break;
             case LCD_STATE_MODE_1:
 
+                //Temperature double to string
+                dtostrf(lcd_ctl.lcd_dht_data.temperature, 4, 2, temp_1);
+                snprintf_P(temp,
+                           sizeof(temp),
+                           PSTR("Temp:  %s %cC "),
+                           temp_1,
+                           (u8)223);
                 lcd.setCursor(0, 0);
-                lcd.print("Temp:  ");
+                lcd.print(temp);
 
-                lcd.setCursor(7, 0);
-                lcd.print(lcd_ctl.lcd_dht_data.temperature);
 
-                lcd.setCursor(12, 0);
-                lcd.print(" ");
-
-                lcd.setCursor(13, 0);
-                lcd.print((char)223);
-
-                lcd.setCursor(14, 0);
-                lcd.print("C ");
-
+                //RH double to string
+                dtostrf(lcd_ctl.lcd_dht_data.humidity, 4, 2, temp_1);
+                snprintf_P(temp,
+                           sizeof(temp),
+                           PSTR("RH  :  %s  %% "),
+                           temp_1);
                 lcd.setCursor(0, 1);
-                lcd.print("RH  :  ");
-
-                lcd.setCursor(7, 1);
-                lcd.print(lcd_ctl.lcd_dht_data.humidity);
-
-                lcd.setCursor(12, 1);
-                lcd.print("  ");
-
-                lcd.setCursor(14, 1);
-                lcd.print("%");
+                lcd.print(temp);
                 break;
 
             case LCD_STATE_MODE_2:
-                //Year
+                snprintf_P(temp,
+                           sizeof(temp),
+                           PSTR("%d/%02d/%02d"),
+                           lcd_ctl.lcd_rtc_time.year,
+                           lcd_ctl.lcd_rtc_time.month,
+                           lcd_ctl.lcd_rtc_time.day);
                 lcd.setCursor(0, 0);
-                lcd.print(lcd_ctl.lcd_rtc_time.year);
-                lcd.print("/");
-                //month
-                lcd.setCursor(5, 0);
-                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.month);
-                lcd.print("/");
-                //day
-                lcd.setCursor(8, 0);
-                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.day);
-                //
-                lcd.setCursor(10, 0);
-                lcd.print("      ");
-                //hour
+                lcd.print(temp);
+
+                snprintf_P(temp,
+                           sizeof(temp),
+                           PSTR("%02d:%02d:%02d"),
+                           lcd_ctl.lcd_rtc_time.hour,
+                           lcd_ctl.lcd_rtc_time.minute,
+                           lcd_ctl.lcd_rtc_time.second);
+
                 lcd.setCursor(0, 1);
-                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.hour);
-                lcd.print(":");
-                //minute
-                lcd.setCursor(3, 1);
-                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.minute);
-                lcd.print(":");
-                //second
-                lcd.setCursor(6, 1);
-                __lcd_print_datetime(lcd_ctl.lcd_rtc_time.second);
-                //
-                lcd.setCursor(8, 1);
-                lcd.print("        ");
+                lcd.print(temp);
                 break;
 
             default:
@@ -515,12 +664,3 @@ void lcd_processing_proc()
     }
 }
 
-void __lcd_print_datetime(uint32_t val)
-{
-    if (val < 10) {
-        lcd.print("0");
-        lcd.print(val);
-    } else {
-        lcd.print(val);
-    }
-}
