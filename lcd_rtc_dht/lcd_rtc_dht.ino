@@ -3,11 +3,20 @@
 
 #include <ThreeWire.h>
 #include <RtcDS1302.h>
+#include <RtcDS3231.h>
 #include "DHT.h"
 
+#if 0
+#define USING_DS1302
+#else
+#define USING_DS3231
+#endif
+
+#ifdef USING_DS1302
 #define DS1302_SCL              12
 #define DS1302_SDA              11
 #define DS1302_RST              10
+#endif
 
 #define DHT_DATA_PIN            9
 #define DHTTYPE                 DHT11
@@ -106,8 +115,13 @@ RtcDateTime rtc_date_time;
 DHT dht(DHT_DATA_PIN, DHTTYPE);
 
 LiquidCrystal_PCF8574 lcd(0x27); // set lcd slave addr, 0x27 or 0x3F
+
+#ifdef USING_DS1302
 ThreeWire myWire(DS1302_SDA, DS1302_SCL, DS1302_RST);
 RtcDS1302<ThreeWire> Rtc(myWire);
+#elif defined(USING_DS3231)
+RtcDS3231<TwoWire> Rtc(Wire);
+#endif
 
 const char custom[][8] PROGMEM = {                        // Custom character definitions
     { 0x1F, 0x1F, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00 }, // char 1
@@ -197,9 +211,12 @@ void lcd_init()
     lcd.setBacklight(1);        // lcd back lightlight 0-255
 
     // create 8 custom characters
-    for (nb = 0; nb < 8; nb++ ) {
-        for (bc = 0; bc < 8; bc++) bb[bc] = pgm_read_byte( &custom[nb][bc] );
-        lcd.createChar ( nb + 1, bb );
+    for (nb = 0; nb < 8; nb++) {
+        for (bc = 0; bc < 8; bc++) {
+            bb[bc] = pgm_read_byte(&custom[nb][bc]);
+        }
+
+        lcd.createChar(nb + 1, bb);
     }
 
     lcd.clear();
@@ -238,22 +255,41 @@ void rtc_init()
     Rtc.Begin();
 
     RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+
+    //Add 6s for compiled done to download into flash
+    compiled += 10;
+
     printDateTime(compiled);
     Serial.println();
 
     if (!Rtc.IsDateTimeValid()) {
-        // Common Causes:
-        //    1) first time you ran and the device wasn't running yet
-        //    2) the battery on the device is low or even missing
+#ifdef USING_DS3231
 
-        Serial.println("RTC lost confidence in the DateTime!");
-        Rtc.SetDateTime(compiled);
+        if (Rtc.LastError() != 0) {
+            // we have a communications error
+            // see https://www.arduino.cc/en/Reference/WireEndTransmission for
+            // what the number means
+            Serial.print("RTC communications error = ");
+            Serial.println(Rtc.LastError());
+        } else {
+#endif
+            // Common Causes:
+            //    1) first time you ran and the device wasn't running yet
+            //    2) the battery on the device is low or even missing
+
+            Serial.println("RTC lost confidence in the DateTime!");
+            Rtc.SetDateTime(compiled);
+        }
     }
+
+#if defined(USING_DS1302)
 
     if (Rtc.GetIsWriteProtected()) {
         Serial.println("RTC was write protected, enabling writing now");
         Rtc.SetIsWriteProtected(false);
     }
+
+#endif
 
     if (!Rtc.GetIsRunning()) {
         Serial.println("RTC was not actively running, starting now");
@@ -261,6 +297,7 @@ void rtc_init()
     }
 
     RtcDateTime now = Rtc.GetDateTime();
+
     if (now < compiled) {
         Serial.println("RTC is older than compile time!  (Updating DateTime)");
         Rtc.SetDateTime(compiled);
@@ -269,6 +306,13 @@ void rtc_init()
     } else if (now == compiled) {
         Serial.println("RTC is the same as compile time! (not expected but all is fine)");
     }
+
+#ifdef USING_DS3231
+    // never assume the Rtc was last configured by you, so
+    // just clear them to your needed state
+    Rtc.Enable32kHzPin(false);
+    Rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
+#endif
 }
 
 void dht_init()
@@ -305,6 +349,7 @@ void button_press_proc()
     unsigned char btn_det;
 
     btn_det = digitalRead(BTN_0_PIN);
+
     if (btn_det != btn_ctl.btn_0_state) {
         if (btn_det == LOW) {
             lcd_processing_mode_change();
@@ -315,6 +360,7 @@ void button_press_proc()
 
 
     btn_det = digitalRead(BTN_1_PIN);
+
     if (btn_det != btn_ctl.btn_1_state) {
         if (btn_det == LOW) {
             led_change_mode();
@@ -336,6 +382,7 @@ void button_press_proc()
 void led_change_mode()
 {
     led_ctl.mode++;
+
     if (led_ctl.mode >= LED_MODE_MAX) {
         led_ctl.mode = LED_MODE_0;
     }
@@ -344,31 +391,40 @@ void led_change_mode()
         case LED_MODE_0:
             led_ctl.interval = LED_INTERVAL_MODE_0;
             break;
+
         case LED_MODE_1:
             led_ctl.interval = LED_INTERVAL_MODE_1;
             break;
+
         case LED_MODE_2:
             led_ctl.interval = LED_INTERVAL_MODE_2;
             break;
+
         case LED_MODE_3:
             led_ctl.interval = LED_INTERVAL_MODE_3;
             break;
+
         case LED_MODE_4:
             led_ctl.interval = LED_INTERVAL_MODE_4;
             break;
+
         case LED_MODE_5:
             led_ctl.interval = LED_INTERVAL_MODE_5;
             break;
+
         case LED_MODE_6:
             led_ctl.interval = LED_INTERVAL_MODE_6;
             break;
+
         case LED_MODE_7:
             led_ctl.interval = LED_INTERVAL_MODE_7;
             break;
+
         default:
             led_ctl.interval = LED_INTERVAL_MODE_0;
             break;
     }
+
 #if 0
     Serial.print("LED MODE ");
     Serial.print(led_ctl.mode);
@@ -384,11 +440,13 @@ void led_proc()
     } else {
         if (!led_ctl.is_down) {
             led_ctl.val <<= 1;
+
             if (led_ctl.val & (0x1 << 7)) {
                 led_ctl.is_down = 1;
             }
         } else {
             led_ctl.val >>= 1;
+
             if (led_ctl.val & 0x1) {
                 led_ctl.is_down = 0;
             }
@@ -409,9 +467,9 @@ void led_proc()
 #endif
 }
 
-void setup ()
+void setup()
 {
-    Serial.begin(9600);
+    Serial.begin(115200);
 
     memset(&time_update, 0, sizeof(time_update_st));
     memset(&lcd_ctl, 0, sizeof(lcd_ctl_st));
@@ -447,11 +505,21 @@ void rtc_get_time(RtcDateTime *rtc_date_time)
     if (!rtc_date_time->IsValid()) {
         Serial.println("RTC lost confidence in the DateTime!");
     }
+
+#ifdef USING_DS3231
+#if 0
+    RtcTemperature temp = Rtc.GetTemperature();
+    temp.Print(Serial);
+    // you may also get the temperature as a float and print it
+    // Serial.print(temp.AsFloatDegC());
+    Serial.println("C");
+#endif
+#endif
 }
 
-void loop ()
+void loop()
 {
-    if(millis() > time_update.time_lcd + INTERVAL_GET_TIME) {
+    if (millis() > time_update.time_lcd + INTERVAL_GET_TIME) {
         time_update.time_lcd = millis();
 
         rtc_get_time(&rtc_date_time);
@@ -486,7 +554,7 @@ void loop ()
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 
-void printDateTime(const RtcDateTime& dt)
+void printDateTime(const RtcDateTime &dt)
 {
     char datestring[20];
 
@@ -498,7 +566,7 @@ void printDateTime(const RtcDateTime& dt)
                dt.Year(),
                dt.Hour(),
                dt.Minute(),
-               dt.Second() );
+               dt.Second());
     Serial.print(datestring);
 }
 
@@ -506,22 +574,32 @@ void printDateTime(const RtcDateTime& dt)
 // writeBigChar: writes big character 'ch' to column x, row y; returns number of columns used by 'ch'
 int writeBigChar(char ch, byte x, byte y)
 {
-    if (ch < ' ' || ch > '_') return 0;                     // If outside table range, do nothing
+    if (ch < ' ' || ch > '_') {
+        return 0;    // If outside table range, do nothing
+    }
+
     nb = 0;                                                 // character byte counter
+
     for (bc = 0; bc < 8; bc++) {
-        bb[bc] = pgm_read_byte( &bigChars[ch - ' '][bc] );  // read 8 bytes from PROGMEM
-        if (bb[bc] != 0) nb++;
+        bb[bc] = pgm_read_byte(&bigChars[ch - ' '][bc]);    // read 8 bytes from PROGMEM
+
+        if (bb[bc] != 0) {
+            nb++;
+        }
     }
 
     bc = 0;
+
     for (row = y; row < y + 2; row++) {
-        for (col = x; col < x + nb / 2; col++ ) {
+        for (col = x; col < x + nb / 2; col++) {
             lcd.setCursor(col, row);                      // move to position
             lcd.write(bb[bc++]);                          // write byte and increment to next
         }
+
         //    lcd.setCursor(col, row);
         //    lcd.write(' ');                                 // Write ' ' between letters
     }
+
     return nb / 2 - 1;                                  // returns number of columns used by char
 }
 
@@ -529,8 +607,10 @@ int writeBigChar(char ch, byte x, byte y)
 void writeBigString(char *str, byte x, byte y)
 {
     char c;
-    while ((c = *str++))
+
+    while ((c = *str++)) {
         x += writeBigChar(c, x, y) + 1;
+    }
 }
 
 
@@ -542,11 +622,13 @@ int freeRam(void)
 {
     extern int  __bss_end, *__brkval;
     int free_memory;
+
     if ((int)__brkval == 0) {
         free_memory = ((int)&free_memory) - ((int)&__bss_end);
     } else {
         free_memory = ((int)&free_memory) - ((int)__brkval);
     }
+
     return free_memory;
 }
 
@@ -556,7 +638,7 @@ void lcd_processing_update_dht_data(float t, float h)
     lcd_ctl.lcd_dht_data.humidity = h;
 }
 
-void lcd_processing_update_time(const RtcDateTime& dt)
+void lcd_processing_update_time(const RtcDateTime &dt)
 {
     lcd_ctl.lcd_rtc_time.year = dt.Year();
     lcd_ctl.lcd_rtc_time.month = dt.Month();
@@ -569,9 +651,11 @@ void lcd_processing_update_time(const RtcDateTime& dt)
 void lcd_processing_mode_change()
 {
     lcd_ctl.lcd_state++;
+
     if (lcd_ctl.lcd_state >= LCD_STATE_MODE_MAX) {
         lcd_ctl.lcd_state = LCD_STATE_MODE_0;
     }
+
     lcd_ctl.lcd_update = 1;
 
     lcd.clear();
@@ -588,7 +672,7 @@ void lcd_processing_proc()
         switch (lcd_ctl.lcd_state) {
             case LCD_STATE_MODE_0:
 
-                if(lcd_ctl.lcd_rtc_time.hour > 11) {
+                if (lcd_ctl.lcd_rtc_time.hour > 11) {
                     lcd.setCursor(0, 0);
                     lcd.print("P");
                     lcd.setCursor(0, 1);
@@ -614,6 +698,7 @@ void lcd_processing_proc()
                 lcd.setCursor(14, 1);
                 lcd.print(temp);
                 break;
+
             case LCD_STATE_MODE_1:
 
                 //Temperature double to string
@@ -663,4 +748,3 @@ void lcd_processing_proc()
         }
     }
 }
-
