@@ -1,0 +1,1 @@
+bin/astyle --style=kr --lineend=linux --suffix=none --pad-header --pad-oper --pad-comma --pad-param-type --unpad-paren --add-braces --break-blocks --indent=spaces=4 --indent-switches --delete-empty-lines --align-pointer=name --align-reference=name
